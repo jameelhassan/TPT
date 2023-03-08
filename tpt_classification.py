@@ -24,6 +24,7 @@ except ImportError:
 import torchvision.models as models
 
 from clip.custom_clip import get_coop
+from clip.maple import get_maple
 from clip.cocoop import get_cocoop
 from data.imagnet_prompts import imagenet_classes
 from data.datautils import AugMixAugmenter, build_dataset
@@ -108,6 +109,23 @@ def main_worker(gpu, args):
         assert args.load is not None
         load_model_weight(args.load, model, 'cpu', args) # to load to cuda: device="cuda:{}".format(args.gpu)
         model_state = deepcopy(model.state_dict())
+    elif args.maple:
+        model = get_maple(args)
+        if args.load is not None:
+            print("Use pre-trained soft prompt (MaPLe) as initialization")
+            maple_pt = torch.load(args.load)['state_dict']
+            pretrained_ctx = maple_pt['prompt_learner.ctx']
+            assert pretrained_ctx.size()[0] == args.n_ctx
+            updates = 0
+            with torch.no_grad():
+                for n, p in model.named_parameters():
+                    if "prompt_learner" in n:
+                        p.copy_(maple_pt[n])
+                        updates += 1
+
+                model.prompt_learner.ctx_init_state = pretrained_ctx
+            print("Updated %d parameters" % updates)
+        model_state = None
     else:
         model = get_coop(args.arch, args.test_sets, args.gpu, args.n_ctx, args.ctx_init)
         if args.load is not None:
@@ -115,12 +133,12 @@ def main_worker(gpu, args):
             pretrained_ctx = torch.load(args.load)['state_dict']['ctx']
             assert pretrained_ctx.size()[0] == args.n_ctx
             with torch.no_grad():
-                model.prompt_learner.ctx.copy_(pretrained_ctx)
+                model.prompt_learner.ctx.copy_(pretrained_ctx)  # Model has a prompt learner submodule that has an attribute CTX to which we copy the prompts!
                 model.prompt_learner.ctx_init_state = pretrained_ctx
         model_state = None
 
     for name, param in model.named_parameters():
-        if not args.cocoop:
+        if not args.cocoop: # MaPLe and CoOp
             if "prompt_learner" not in name:
                 param.requires_grad_(False)
         else:
@@ -200,13 +218,13 @@ def main_worker(gpu, args):
                     classnames = [classnames_all[i] for i in label_mask]
             else:
                 classnames = classnames_all
-        if args.cocoop:
-            model.prompt_generator.reset_classnames(classnames, args.arch)
-            model = model.cpu()
-            model_state = model.state_dict()
-            model = model.cuda(args.gpu)
-        else:
-            model.reset_classnames(classnames, args.arch)
+        # if args.cocoop:
+        #     model.prompt_generator.reset_classnames(classnames, args.arch)
+        #     model = model.cpu()
+        #     model_state = model.state_dict()
+        #     model = model.cuda(args.gpu)
+        # else:
+        #     model.reset_classnames(classnames, args.arch)   # Check what this does
 
         val_dataset = build_dataset(set_id, data_transform, args.data, mode=args.dataset_mode)
         print("number of test samples: {}".format(len(val_dataset)))
@@ -246,9 +264,9 @@ def test_time_adapt_eval(val_loader, model, model_state, optimizer, optim_state,
 
     # reset model and switch to evaluate mode
     model.eval()
-    if not args.cocoop: # no need to reset cocoop because it's fixed
-        with torch.no_grad():
-            model.reset()
+    # if not args.cocoop: # no need to reset cocoop because it's fixed
+    #     with torch.no_grad():
+    #         model.reset()
     end = time.time()
     for i, (images, target) in enumerate(val_loader):
         assert args.gpu is not None
@@ -269,9 +287,9 @@ def test_time_adapt_eval(val_loader, model, model_state, optimizer, optim_state,
 
         # reset the tunable prompt to its initial state
         if not args.cocoop: # no need to reset cocoop because it's fixed
-            if args.tta_steps > 0:
-                with torch.no_grad():
-                    model.reset()
+            # if args.tta_steps > 0:
+            #     with torch.no_grad():
+            #         model.reset()
             optimizer.load_state_dict(optim_state)
             test_time_tuning(model, images, optimizer, scaler, args)
         else:
@@ -330,8 +348,10 @@ if __name__ == '__main__':
     parser.add_argument('--selection_p', default=0.1, type=float, help='confidence selection percentile')
     parser.add_argument('--tta_steps', default=1, type=int, help='test-time-adapt steps')
     parser.add_argument('--n_ctx', default=4, type=int, help='number of tunable tokens')
+    parser.add_argument('--maple_depth', default=9, type=int, help='Depth of MaPLe prompting')
     parser.add_argument('--ctx_init', default=None, type=str, help='init tunable prompts')
     parser.add_argument('--cocoop', action='store_true', default=False, help="use cocoop's output as prompt initialization")
+    parser.add_argument('--maple', action='store_true', default=False, help="use MaPLe's output as prompt initialization")
     parser.add_argument('--load', default=None, type=str, help='path to a pre-trained coop/cocoop')
     parser.add_argument('--seed', type=int, default=0)
 

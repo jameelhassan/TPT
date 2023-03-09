@@ -2,8 +2,8 @@
 
 data_root='./datasets'
 testsets=$1
-arch=RN50
-# arch=ViT-B/16
+# arch=RN50
+arch=ViT-B/16
 bs=64
 ctx_init=a_photo_of_a
 

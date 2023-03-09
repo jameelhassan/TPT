@@ -271,6 +271,7 @@ class CustomCLIP(nn.Module):
 
     def reset_classnames(self, classnames, arch):
         self.prompt_learner.reset_classnames(classnames, arch)
+        self.tokenized_prompts = self.prompt_learner.tokenized_prompts
 
 
 def _get_clones(module, N):

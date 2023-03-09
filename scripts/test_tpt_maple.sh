@@ -9,5 +9,4 @@ bs=64
 
 python ./tpt_classification.py ${data_root} --test_sets ${testsets} \
 -a ${arch} -b ${bs} --gpu 1 --n_ctx 2 \
---tpt --maple \
---load ${coop_weight}
+--tpt --maple --load ${coop_weight}

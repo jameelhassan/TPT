@@ -252,6 +252,16 @@ def main_worker(gpu, args):
         print("{:.2f}".format(results[id][0]), end="	")
     print("\n")
 
+    with open('outputs/perf.txt', 'a') as f:
+        if args.maple:
+            model = 'MaPLe_' + 'depth_' + str(args.maple_depth) + '_ctx_' + str(args.n_ctx)
+        elif args.cocoop:
+            model = 'CoCoop' + 'ctx_' + str(args.n_ctx)
+        else:
+            model = "CoOp" + 'ctx_' + str(args.n_ctx)
+        for k in results.keys():
+            f.write("{} {} performance on {}: Top1- {:.2f}, Top5- {:.2f}\n".format(model, args.arch, k, results[k][0], results[k][1]))
+
 
 def test_time_adapt_eval(val_loader, model, model_state, optimizer, optim_state, scaler, args):
     batch_time = AverageMeter('Time', ':6.3f', Summary.NONE)

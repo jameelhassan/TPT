@@ -124,6 +124,7 @@ def main_worker(gpu, args):
                         updates += 1
 
                 model.prompt_learner.ctx_init_state = pretrained_ctx
+            del maple_pt
             print("Updated %d parameters" % updates)
         model_state = None
     else:
@@ -218,13 +219,13 @@ def main_worker(gpu, args):
                     classnames = [classnames_all[i] for i in label_mask]
             else:
                 classnames = classnames_all
-        # if args.cocoop:
-        #     model.prompt_generator.reset_classnames(classnames, args.arch)
-        #     model = model.cpu()
-        #     model_state = model.state_dict()
-        #     model = model.cuda(args.gpu)
-        # else:
-        #     model.reset_classnames(classnames, args.arch)   # Check what this does
+        if args.cocoop:
+            model.prompt_generator.reset_classnames(classnames, args.arch)
+            model = model.cpu()
+            model_state = model.state_dict()
+            model = model.cuda(args.gpu)
+        else:
+            model.reset_classnames(classnames, args.arch)   # Check what this does
 
         val_dataset = build_dataset(set_id, data_transform, args.data, mode=args.dataset_mode)
         print("number of test samples: {}".format(len(val_dataset)))
@@ -264,9 +265,9 @@ def test_time_adapt_eval(val_loader, model, model_state, optimizer, optim_state,
 
     # reset model and switch to evaluate mode
     model.eval()
-    # if not args.cocoop: # no need to reset cocoop because it's fixed
-    #     with torch.no_grad():
-    #         model.reset()
+    if not args.cocoop: # no need to reset cocoop because it's fixed
+        with torch.no_grad():
+            model.reset()
     end = time.time()
     for i, (images, target) in enumerate(val_loader):
         assert args.gpu is not None
@@ -287,9 +288,9 @@ def test_time_adapt_eval(val_loader, model, model_state, optimizer, optim_state,
 
         # reset the tunable prompt to its initial state
         if not args.cocoop: # no need to reset cocoop because it's fixed
-            # if args.tta_steps > 0:
-            #     with torch.no_grad():
-            #         model.reset()
+            if args.tta_steps > 0:
+                with torch.no_grad():
+                    model.reset()
             optimizer.load_state_dict(optim_state)
             test_time_tuning(model, images, optimizer, scaler, args)
         else:

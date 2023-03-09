@@ -69,12 +69,14 @@ class TextEncoder(nn.Module):
 
 
 class MultiModalPromptLearner(nn.Module):
-    def __init__(self, args, classnames, clip_model):
+    def __init__(self, args, classnames, clip_model, learned_cls=False):
         super().__init__()
+        self.learned_cls = False  # Just copied, check if setting to True
         n_cls = len(classnames)
         n_ctx = args.n_ctx
         ctx_init = args.ctx_init
         dtype = clip_model.dtype
+        self.dtype = dtype
         ctx_dim = clip_model.ln_final.weight.shape[0]
         clip_imsize = clip_model.visual.input_resolution
         # cfg_imsize = cfg.INPUT.SIZE[0]
@@ -97,13 +99,18 @@ class MultiModalPromptLearner(nn.Module):
             ctx_vectors = torch.empty(n_ctx, ctx_dim, dtype=dtype)
             nn.init.normal_(ctx_vectors, std=0.02)
             prompt_prefix = " ".join(["X"] * n_ctx)
+
+        self.prompt_prefix = prompt_prefix
+
         print('MaPLe design: Multi-modal Prompt Learning')
         print(f'Initial context: "{prompt_prefix}"')
         print(f"Number of MaPLe context words (tokens): {n_ctx}")
         # These below, related to the shallow prompts
         # Linear layer so that the tokens will project to 512 and will be initialized from 768
         self.proj = nn.Linear(ctx_dim, 768)
-        self.proj.half()
+        self.proj_weight_init_state = self.proj.weight.detach().clone()
+        self.proj_bias_init_state = self.proj.bias.detach().clone()
+        self.ctx_init_state = ctx_vectors.detach().clone()
         self.ctx = nn.Parameter(ctx_vectors)
         # These below parameters related to the shared prompts
         # Define the compound prompts for the deeper layers
@@ -112,17 +119,22 @@ class MultiModalPromptLearner(nn.Module):
         # compound prompts
         self.compound_prompts_text = nn.ParameterList([nn.Parameter(torch.empty(n_ctx, 512))
                                                       for _ in range(self.compound_prompts_depth - 1)])
+
         for single_para in self.compound_prompts_text:
             nn.init.normal_(single_para, std=0.02)
+        # Copy init state
+        self.compound_prompts_text_init_state = [txt_prompt.detach().clone() for txt_prompt in self.compound_prompts_text]
+
         # Also make corresponding projection layers, for each prompt
         single_layer = nn.Linear(ctx_dim, 768)
         self.compound_prompt_projections = _get_clones(single_layer, self.compound_prompts_depth - 1)
+        self.compound_prompt_projections_init_state = [(module.weight.detach().clone(), module.bias.detach().clone()) for module in self.compound_prompt_projections]
 
         classnames = [name.replace("_", " ") for name in classnames]
         name_lens = [len(_tokenizer.encode(name)) for name in classnames]
         prompts = [prompt_prefix + " " + name + "." for name in classnames]
 
-        tokenized_prompts = torch.cat([clip.tokenize(p) for p in prompts])  # (n_cls, n_tkn)
+        tokenized_prompts = torch.cat([clip.tokenize(p) for p in prompts]) # (n_cls, n_tkn)
         with torch.no_grad():
             embedding = clip_model.token_embedding(tokenized_prompts).type(dtype)
 
@@ -176,6 +188,54 @@ class MultiModalPromptLearner(nn.Module):
         # Now the other way around
         # We will project the textual prompts from 512 to 768
         return prompts, self.proj(self.ctx), self.compound_prompts_text, visual_deep_prompts   # pass here original, as for visual 768 is required
+    
+    def reset(self):
+        ctx_vectors = self.ctx_init_state
+        self.ctx.copy_(ctx_vectors) # to be optimized
+        if self.learned_cls:
+            cls_vectors = self.cls_init_state
+            self.cls.copy_(cls_vectors)
+
+        with torch.no_grad():
+            self.proj.weight.copy_(self.proj_weight_init_state)
+            self.proj.bias.copy_(self.proj_bias_init_state)
+
+            for idx, prompt in enumerate(self.compound_prompts_text):
+                prompt.copy_(self.compound_prompts_text_init_state[idx])
+            
+            for idx, module in enumerate(self.compound_prompt_projections):
+                module.weight.copy_(self.compound_prompt_projections_init_state[idx][0])
+                module.bias.copy_(self.compound_prompt_projections_init_state[idx][1])
+
+    def reset_classnames(self, classnames, arch):
+        self.device = self.ctx.device
+        self.n_cls = len(classnames)
+        if not self.learned_cls:
+            classnames = [name.replace("_", " ") for name in classnames]
+            name_lens = [len(_tokenizer.encode(name)) for name in classnames]
+            prompts = [self.prompt_prefix + " " + name + "." for name in classnames]
+        else:
+            cls_vectors = torch.empty(self.n_cls, 1, self.ctx_dim, dtype=self.dtype) # assume each learnable cls_token is only 1 word
+            nn.init.normal_(cls_vectors, std=0.02)
+            cls_token = "X"
+            name_lens = [1 for _ in classnames]
+            prompts = [self.prompt_prefix + " " + cls_token + "." for _ in classnames]
+            # TODO: re-init the cls parameters
+            # self.cls = nn.Parameter(cls_vectors) # to be optimized
+            self.cls_init_state = cls_vectors.detach().clone()
+        tokenized_prompts = torch.cat([tokenize(p) for p in prompts]).to(self.device)
+
+        clip, _, _ = load(arch, device=self.device, download_root=DOWNLOAD_ROOT)
+
+        with torch.no_grad():
+            embedding = clip.token_embedding(tokenized_prompts).type(self.dtype)
+
+        self.token_prefix = embedding[:, :1, :]
+        self.token_suffix = embedding[:, 1 + self.n_ctx :, :]  # CLS, EOS
+
+        self.name_lens = name_lens
+        self.tokenized_prompts = tokenized_prompts
+        self.classnames = classnames
 
 
 class CustomCLIP(nn.Module):
@@ -204,6 +264,13 @@ class CustomCLIP(nn.Module):
             return F.cross_entropy(logits, label)
 
         return logits
+
+    # restore the initial state of the prompt_learner (tunable prompt)
+    def reset(self):
+        self.prompt_learner.reset()
+
+    def reset_classnames(self, classnames, arch):
+        self.prompt_learner.reset_classnames(classnames, arch)
 
 
 def _get_clones(module, N):

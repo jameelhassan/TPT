@@ -237,6 +237,15 @@ class MultiModalPromptLearner(nn.Module):
         self.tokenized_prompts = tokenized_prompts
         self.classnames = classnames
 
+    def set_prompt_init_states(self):
+        ctx_vectors = self.ctx.detach().clone()
+        self.ctx_init_state = ctx_vectors
+        self.proj_weight_init_state = self.proj.weight.detach().clone()
+        self.proj_bias_init_state = self.proj.bias.detach().clone()
+
+        self.compound_prompts_text_init_state = [txt_prompt.detach().clone() for txt_prompt in self.compound_prompts_text]
+        self.compound_prompt_projections_init_state = [(module.weight.detach().clone(), module.bias.detach().clone()) for module in self.compound_prompt_projections]
+
 
 class CustomCLIP(nn.Module):
     def __init__(self, args, classnames, clip_model):
@@ -273,6 +282,9 @@ class CustomCLIP(nn.Module):
         self.prompt_learner.reset_classnames(classnames, arch)
         self.tokenized_prompts = self.prompt_learner.tokenized_prompts
 
+    def set_prompt_inits(self):
+        print("Re-updating prompt initializations to current prompts.")
+        self.prompt_learner.set_prompt_init_states()
 
 def _get_clones(module, N):
     return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
@@ -292,6 +304,7 @@ def get_maple(args):
 
     print(f"Loading CLIP (backbone: {clip_arch})")
     clip_model = load_clip_to_cpu(args)
+    clip_model.float()
     print("Building custom CLIP")
     model = CustomCLIP(args, classnames, clip_model)
     model.to(device)

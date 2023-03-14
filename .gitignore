@@ -1,5 +1,5 @@
 datasets
-weights/
+weights
 outputs
 ~/
 __pycache__/

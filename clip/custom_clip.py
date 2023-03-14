@@ -177,7 +177,7 @@ class PromptLearner(nn.Module):
         self.token_suffix = embedding[:, 1 + self.n_ctx :, :]  # CLS, EOS
 
         self.name_lens = name_lens
-        self.tokenized_prompts = tokenized_prompts
+        self.tokenized_prompts = tokenized_prompts      # Tokenized X X X X CLS
         self.classnames = classnames
 
     def forward(self, init=None):

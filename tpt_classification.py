@@ -123,7 +123,8 @@ def main_worker(gpu, args):
                         p.copy_(maple_pt[n])
                         updates += 1
 
-                model.prompt_learner.ctx_init_state = pretrained_ctx
+            model.prompt_learner.ctx_init_state = pretrained_ctx
+            model.set_prompt_inits()
             del maple_pt
             print("Updated %d parameters" % updates)
         model_state = None
@@ -225,7 +226,7 @@ def main_worker(gpu, args):
             model_state = model.state_dict()
             model = model.cuda(args.gpu)
         else:
-            model.reset_classnames(classnames, args.arch)   # Check what this does
+            model.reset_classnames(classnames, args.arch)   # Reset classnames if variant of Imagenet is used
 
         val_dataset = build_dataset(set_id, data_transform, args.data, mode=args.dataset_mode)
         print("number of test samples: {}".format(len(val_dataset)))

@@ -18,7 +18,7 @@ from data.fewshot_datasets import *
 import data.augmix_ops as augmentations
 
 ID_to_DIRNAME={
-    'I': 'imagenet',
+    'I': 'imagenet/images',
     'A': 'imagenet-a',
     'K': 'ImageNet-Sketch',
     'R': 'imagenet-r',

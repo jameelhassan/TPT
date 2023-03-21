@@ -301,13 +301,14 @@ def main_worker(gpu, args):
         print("{:.2f}".format(results[id][0]), end="	")
     print("\n")
 
+    tpt_stat = 'TPT' if args.tpt else 'No_TPT'
     with open('outputs/perf.txt', 'a') as f:
         if args.maple:
-            model = 'MaPLe_' + 'depth_' + str(args.maple_depth) + '_ctx_' + str(args.n_ctx)
+            model = tpt_stat + '_MaPLe_' + 'depth_' + str(args.maple_depth) + '_ctx_' + str(args.n_ctx) + '_lr_' + str(args.lr)
         elif args.cocoop:
-            model = 'CoCoop' + 'ctx_' + str(args.n_ctx)
+            model = tpt_stat + '_CoCoop' + 'ctx_' + str(args.n_ctx) + '_lr_' + str(args.lr)
         else:
-            model = "CoOp" + 'ctx_' + str(args.n_ctx)
+            model = tpt_stat + "_CoOp" + 'ctx_' + str(args.n_ctx) + '_lr_' + str(args.lr)
         for k in results.keys():
             f.write("{} {} performance on {}: Top1- {:.2f}, Top5- {:.2f}\n".format(model, args.arch, k, results[k][0], results[k][1]))
 
@@ -491,7 +492,7 @@ if __name__ == '__main__':
     parser.add_argument('--selection_p', default=0.1, type=float, help='confidence selection percentile')
     parser.add_argument('--tta_steps', default=1, type=int, help='test-time-adapt steps')
     parser.add_argument('--n_ctx', default=4, type=int, help='number of tunable tokens')
-    parser.add_argument('--maple_depth', default=9, type=int, help='Depth of MaPLe prompting')
+    parser.add_argument('--maple_depth', default=3, type=int, help='Depth of MaPLe prompting')
     parser.add_argument('--ctx_init', default=None, type=str, help='init tunable prompts')
     parser.add_argument('--cocoop', action='store_true', default=False, help="use cocoop's output as prompt initialization")
     parser.add_argument('--maple', action='store_true', default=False, help="use MaPLe's output as prompt initialization")

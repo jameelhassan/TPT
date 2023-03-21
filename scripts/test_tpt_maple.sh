@@ -1,7 +1,7 @@
 #!/bin/bash
 
 data_root='./datasets'
-maple_weight='weights/maple/ori/seed1/MultiModalPromptLearner/model.pth.tar-2'
+maple_weight='weights/maple/ori/seed2/MultiModalPromptLearner/model.pth.tar-2'
 testsets=$1
 # arch=ViT-B/32
 arch=ViT-B/16

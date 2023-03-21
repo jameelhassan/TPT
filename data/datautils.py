@@ -66,7 +66,7 @@ def get_preaugment():
         ])
 
 def augmix(image, preprocess, aug_list, severity=1):
-    preaugment = get_preaugment()
+    preaugment = get_preaugment()   # Resizing with scaling and ratio
     x_orig = preaugment(image)
     x_processed = preprocess(x_orig)
     if len(aug_list) == 0:
@@ -102,4 +102,62 @@ class AugMixAugmenter(object):
         return [image] + views
 
 
+class MaskImgAugmenter(object):
+    def __init__(self, base_transform, preprocess, n_views=2, augmix=False, 
+                    severity=1, mask=True):
+        self.base_transform = base_transform
+        self.preprocess = preprocess
+        self.n_views = n_views
+        if augmix:
+            self.aug_list = augmentations.augmentations
+        else:
+            self.aug_list = []
+        self.severity = severity
+        # self.mask_generator = MaskGenerator(
+        #     input_size=args.input_size,       
+        #     mask_patch_size=train_config['mask_patch_size'],
+        #     model_patch_size=train_config['model_patch_size'],
+        #     mask_ratio=train_config['mask_ratio'],
+        # )
+        self.mask_generator = MaskGenerator(
+            input_size=224,       
+            mask_patch_size=32,
+            model_patch_size=16,
+            mask_ratio=0.2,
+        )
+        
+    def __call__(self, x):
+        image = self.preprocess(self.base_transform(x))
+        views = [augmix(x, self.preprocess, self.aug_list, self.severity) for _ in range(self.n_views)]
+        masks = [self.mask_generator() for _ in range(self.n_views)]
+        return ([image] + views, masks)
+
+
+class MaskGenerator:
+    def __init__(self, input_size, mask_patch_size, model_patch_size, mask_ratio):
+        self.input_size = input_size
+        self.mask_patch_size = mask_patch_size
+        self.model_patch_size = model_patch_size
+        self.mask_ratio = mask_ratio
+        
+        assert self.input_size % self.mask_patch_size == 0
+        assert self.mask_patch_size % self.model_patch_size == 0
+        
+        self.rand_size = self.input_size // self.mask_patch_size
+        self.scale = self.mask_patch_size // self.model_patch_size
+        
+        self.token_count = self.rand_size ** 2
+        
+        self.mask_count = int(np.ceil(self.token_count * self.mask_ratio))
+        
+    def __call__(self):
+
+        mask_idx = np.random.permutation(self.token_count)[:self.mask_count]
+        mask = np.zeros(self.token_count, dtype=int)
+        mask[mask_idx] = 1
+        
+        mask = mask.reshape((self.rand_size, self.rand_size))
+        mask = mask.repeat(self.scale, axis=0).repeat(self.scale, axis=1)
+        
+        return mask
 

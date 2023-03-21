@@ -27,7 +27,7 @@ from clip.custom_clip import get_coop
 from clip.maple import get_maple
 from clip.cocoop import get_cocoop
 from data.imagnet_prompts import imagenet_classes
-from data.datautils import AugMixAugmenter, build_dataset
+from data.datautils import AugMixAugmenter, build_dataset, MaskImgAugmenter
 from utils.tools import Summary, AverageMeter, ProgressMeter, accuracy, load_model_weight, set_random_seed
 from data.cls_to_names import *
 from data.fewshot_datasets import fewshot_datasets
@@ -65,6 +65,38 @@ def test_time_tuning(model, inputs, optimizer, scaler, args):
                 output = model((image_feature, pgen_ctx))
             else:
                 output = model(inputs) 
+
+            if selected_idx is not None:
+                output = output[selected_idx]
+            else:
+                output, selected_idx = select_confident_samples(output, args.selection_p)
+
+            loss = avg_entropy(output)
+        
+        optimizer.zero_grad()
+        # compute gradient and do SGD step
+        scaler.scale(loss).backward()
+        # Unscales the gradients of optimizer's assigned params in-place
+        scaler.step(optimizer)
+        scaler.update()
+    if args.cocoop:
+        return pgen_ctx
+
+    return
+
+def test_time_mask_tuning(model, inputs, masks, optimizer, scaler, args):
+    if args.cocoop:
+        image_feature, pgen_ctx = inputs
+        pgen_ctx.requires_grad = True
+        optimizer = torch.optim.AdamW([pgen_ctx], args.lr)
+    
+    selected_idx = None
+    for j in range(args.tta_steps):
+        with torch.cuda.amp.autocast():
+            if args.cocoop:
+                output = model((image_feature, pgen_ctx))
+            else:
+                output = model(inputs, masks) 
 
             if selected_idx is not None:
                 output = output[selected_idx]
@@ -182,15 +214,26 @@ def main_worker(gpu, args):
     results = {}
     for set_id in datasets:
         if args.tpt:
-            base_transform = transforms.Compose([
-                transforms.Resize(args.resolution, interpolation=BICUBIC),
-                transforms.CenterCrop(args.resolution)])
-            preprocess = transforms.Compose([
-                transforms.ToTensor(),
-                normalize])
-            data_transform = AugMixAugmenter(base_transform, preprocess, n_views=args.batch_size-1, 
-                                            augmix=len(set_id)>1)
-            batchsize = 1
+            if not args.mask:
+                base_transform = transforms.Compose([
+                    transforms.Resize(args.resolution, interpolation=BICUBIC),
+                    transforms.CenterCrop(args.resolution)])
+                preprocess = transforms.Compose([
+                    transforms.ToTensor(),
+                    normalize])
+                data_transform = AugMixAugmenter(base_transform, preprocess, n_views=args.batch_size-1, 
+                                                augmix=len(set_id)>1)
+                batchsize = 1
+            else:
+                base_transform = transforms.Compose([
+                    transforms.Resize(args.resolution, interpolation=BICUBIC),
+                    transforms.CenterCrop(args.resolution)])
+                preprocess = transforms.Compose([
+                    transforms.ToTensor(),
+                    normalize])
+                data_transform = MaskImgAugmenter(base_transform, preprocess, n_views=args.batch_size-1, 
+                                                augmix=len(set_id)>1)
+                batchsize = 1
         else:
             data_transform = transforms.Compose([
                 transforms.Resize(args.resolution, interpolation=BICUBIC),
@@ -225,6 +268,8 @@ def main_worker(gpu, args):
             model = model.cpu()
             model_state = model.state_dict()
             model = model.cuda(args.gpu)
+        elif args.maple:
+            model.reset_classnames(classnames, args)   # Reset classnames if variant of Imagenet is used
         else:
             model.reset_classnames(classnames, args.arch)   # Reset classnames if variant of Imagenet is used
 
@@ -235,7 +280,10 @@ def main_worker(gpu, args):
                     batch_size=batchsize, shuffle=True,
                     num_workers=args.workers, pin_memory=True)
             
-        results[set_id] = test_time_adapt_eval(val_loader, model, model_state, optimizer, optim_state, scaler, args)
+        if args.mask:
+            results[set_id] = test_time_adapt_mask_eval(val_loader, model, model_state, optimizer, optim_state, scaler, args)
+        else:
+            test_time_adapt_eval(val_loader, model, model_state, optimizer, optim_state, scaler, args)
         del val_dataset, val_loader
         try:
             print("=> Acc. on testset [{}]: @1 {}/ @5 {}".format(set_id, results[set_id][0], results[set_id][1]))
@@ -340,6 +388,88 @@ def test_time_adapt_eval(val_loader, model, model_state, optimizer, optim_state,
     return [top1.avg, top5.avg]
 
 
+def test_time_adapt_mask_eval(val_loader, model, model_state, optimizer, optim_state, scaler, args):
+    # When using masking
+    batch_time = AverageMeter('Time', ':6.3f', Summary.NONE)
+    top1 = AverageMeter('Acc@1', ':6.2f', Summary.AVERAGE)
+    top5 = AverageMeter('Acc@5', ':6.2f', Summary.AVERAGE)
+
+    progress = ProgressMeter(
+        len(val_loader),
+        [batch_time, top1, top5],
+        prefix='Test: ')
+
+    # reset model and switch to evaluate mode
+    model.eval()
+    if not args.cocoop: # no need to reset cocoop because it's fixed
+        with torch.no_grad():
+            model.reset()
+    end = time.time()
+    for i, (img_n_mask, target) in enumerate(val_loader):
+        images, masks = img_n_mask[0], img_n_mask[1]
+        assert args.gpu is not None
+        if isinstance(images, list):
+            for k in range(len(images)):
+                images[k] = images[k].cuda(args.gpu, non_blocking=True)
+            image = images[0]
+        else:
+            if len(images.size()) > 4:
+                # when using ImageNet Sampler as the dataset
+                assert images.size()[0] == 1
+                images = images.squeeze(0)
+            images = images.cuda(args.gpu, non_blocking=True)
+            image = images
+        target = target.cuda(args.gpu, non_blocking=True)
+        if args.tpt:
+            masks = torch.cat(masks, dim=0)
+            images = torch.cat(images, dim=0)
+
+        # reset the tunable prompt to its initial state
+        if not args.cocoop: # no need to reset cocoop because it's fixed
+            if args.tta_steps > 0:
+                with torch.no_grad():
+                    model.reset()
+            optimizer.load_state_dict(optim_state)
+            if args.mask:
+                test_time_mask_tuning(model, images, masks, optimizer, scaler, args)
+            else:
+                test_time_tuning(model, images, optimizer, scaler, args)
+        else:
+            with torch.no_grad():
+                with torch.cuda.amp.autocast():
+                    image_feature, pgen_ctx = model.gen_ctx(images, args.tpt)
+            optimizer = None
+            pgen_ctx = test_time_tuning(model, (image_feature, pgen_ctx), optimizer, scaler, args)
+
+        # The actual inference goes here
+        if args.tpt:
+            if args.cocoop:
+                image_feature = image_feature[0].unsqueeze(0)
+        
+        with torch.no_grad():
+            with torch.cuda.amp.autocast():
+                if args.cocoop:
+                    output = model((image_feature, pgen_ctx))
+                else:
+                    output = model(image)
+        # measure accuracy and record loss
+        acc1, acc5 = accuracy(output, target, topk=(1, 5))
+                
+        top1.update(acc1[0], image.size(0))
+        top5.update(acc5[0], image.size(0))
+
+        # measure elapsed time
+        batch_time.update(time.time() - end)
+        end = time.time()
+
+        if (i+1) % args.print_freq == 0:
+            progress.display(i)
+
+    progress.display_summary()
+
+    return [top1.avg, top5.avg]
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Test-time Prompt Tuning')
     parser.add_argument('data', metavar='DIR', help='path to dataset root')
@@ -357,6 +487,7 @@ if __name__ == '__main__':
     parser.add_argument('--gpu', default=0, type=int,
                         help='GPU id to use.')
     parser.add_argument('--tpt', action='store_true', default=False, help='run test-time prompt tuning')
+    parser.add_argument('--mask', action='store_true', default=False, help='Perform masking augmentation')
     parser.add_argument('--selection_p', default=0.1, type=float, help='confidence selection percentile')
     parser.add_argument('--tta_steps', default=1, type=int, help='test-time-adapt steps')
     parser.add_argument('--n_ctx', default=4, type=int, help='number of tunable tokens')

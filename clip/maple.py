@@ -207,7 +207,7 @@ class MultiModalPromptLearner(nn.Module):
                 module.weight.copy_(self.compound_prompt_projections_init_state[idx][0])
                 module.bias.copy_(self.compound_prompt_projections_init_state[idx][1])
 
-    def reset_classnames(self, classnames, arch):
+    def reset_classnames(self, classnames, args):
         self.device = self.ctx.device
         self.n_cls = len(classnames)
         if not self.learned_cls:
@@ -225,7 +225,7 @@ class MultiModalPromptLearner(nn.Module):
             self.cls_init_state = cls_vectors.detach().clone()
         tokenized_prompts = torch.cat([tokenize(p) for p in prompts]).to(self.device)
 
-        clip, _, _ = load(arch, device=self.device, download_root=DOWNLOAD_ROOT)
+        clip = load_clip_to_cpu(args).to(self.device)
 
         with torch.no_grad():
             embedding = clip.token_embedding(tokenized_prompts).type(self.dtype)

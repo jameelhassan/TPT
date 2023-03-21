@@ -129,7 +129,7 @@ class MaskImgAugmenter(object):
     def __call__(self, x):
         image = self.preprocess(self.base_transform(x))
         views = [augmix(x, self.preprocess, self.aug_list, self.severity) for _ in range(self.n_views)]
-        masks = [self.mask_generator() for _ in range(self.n_views)]
+        masks = [self.mask_generator() for _ in range(self.n_views + 1)]
         return ([image] + views, masks)
 
 

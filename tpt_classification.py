@@ -25,6 +25,7 @@ import torchvision.models as models
 
 from clip.custom_clip import get_coop
 from clip.maple import get_maple
+from clip.coop_mine import get_coop as get_mycoop
 from clip.cocoop import get_cocoop
 from data.imagnet_prompts import imagenet_classes
 from data.datautils import AugMixAugmenter, build_dataset, MaskImgAugmenter
@@ -160,6 +161,16 @@ def main_worker(gpu, args):
             del maple_pt
             print("Updated %d parameters" % updates)
         model_state = None
+    elif args.mycoop:
+        model = get_mycoop(args)
+        if args.load is not None:
+            print("Use pre-trained soft prompt (CoOp) as initialization")
+            pretrained_ctx = torch.load(args.load)['state_dict']['ctx']
+            assert pretrained_ctx.size()[0] == args.n_ctx
+            with torch.no_grad():
+                model.prompt_learner.ctx.copy_(pretrained_ctx)
+                model.prompt_learner.ctx_init_state = pretrained_ctx
+        model_state = None
     else:
         model = get_coop(args.arch, args.test_sets, args.gpu, args.n_ctx, args.ctx_init)
         if args.load is not None:
@@ -270,6 +281,8 @@ def main_worker(gpu, args):
             model = model.cuda(args.gpu)
         elif args.maple:
             model.reset_classnames(classnames, args)   # Reset classnames if variant of Imagenet is used
+        elif args.mycoop:
+            model.reset_classnames(classnames, args)
         else:
             model.reset_classnames(classnames, args.arch)   # Reset classnames if variant of Imagenet is used
 
@@ -283,7 +296,7 @@ def main_worker(gpu, args):
         if args.mask:
             results[set_id] = test_time_adapt_mask_eval(val_loader, model, model_state, optimizer, optim_state, scaler, args)
         else:
-            test_time_adapt_eval(val_loader, model, model_state, optimizer, optim_state, scaler, args)
+            results[set_id] = test_time_adapt_eval(val_loader, model, model_state, optimizer, optim_state, scaler, args)
         del val_dataset, val_loader
         try:
             print("=> Acc. on testset [{}]: @1 {}/ @5 {}".format(set_id, results[set_id][0], results[set_id][1]))
@@ -301,14 +314,15 @@ def main_worker(gpu, args):
         print("{:.2f}".format(results[id][0]), end="	")
     print("\n")
 
-    tpt_stat = 'TPT' if args.tpt else 'No_TPT'
+    tpt_stat = '_TPT' if args.tpt else '_No_TPT'
+    masking = 'Masking50' if args.mask else 'No_Masking'
     with open('outputs/perf.txt', 'a') as f:
         if args.maple:
-            model = tpt_stat + '_MaPLe_' + 'depth_' + str(args.maple_depth) + '_ctx_' + str(args.n_ctx) + '_lr_' + str(args.lr)
+            model = masking + tpt_stat + '_MaPLe_' + 'depth_' + str(args.maple_depth) + '_ctx_' + str(args.n_ctx) + '_lr_' + str(args.lr)
         elif args.cocoop:
-            model = tpt_stat + '_CoCoop' + 'ctx_' + str(args.n_ctx) + '_lr_' + str(args.lr)
+            model = masking + tpt_stat + '_CoCoop' + 'ctx_' + str(args.n_ctx) + '_lr_' + str(args.lr)
         else:
-            model = tpt_stat + "_CoOp" + 'ctx_' + str(args.n_ctx) + '_lr_' + str(args.lr)
+            model = masking + tpt_stat + "_CoOp" + 'ctx_' + str(args.n_ctx) + '_lr_' + str(args.lr)
         for k in results.keys():
             f.write("{} {} performance on {}: Top1- {:.2f}, Top5- {:.2f}\n".format(model, args.arch, k, results[k][0], results[k][1]))
 
@@ -496,6 +510,7 @@ if __name__ == '__main__':
     parser.add_argument('--ctx_init', default=None, type=str, help='init tunable prompts')
     parser.add_argument('--cocoop', action='store_true', default=False, help="use cocoop's output as prompt initialization")
     parser.add_argument('--maple', action='store_true', default=False, help="use MaPLe's output as prompt initialization")
+    parser.add_argument('--mycoop', action='store_true', default=False, help="use MaPLe's output as prompt initialization")
     parser.add_argument('--load', default=None, type=str, help='path to a pre-trained coop/cocoop')
     parser.add_argument('--seed', type=int, default=0)
 

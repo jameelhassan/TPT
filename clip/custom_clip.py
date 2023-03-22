@@ -307,9 +307,9 @@ class ClipTestTimeTuning(nn.Module):
 
         return torch.mean(text_features, dim=0)
 
-    def inference(self, image):
+    def inference(self, image, masks=None):
         with torch.no_grad():
-            image_features = self.image_encoder(image.type(self.dtype))
+            image_features = self.image_encoder(image.type(self.dtype), masks=masks)
 
         text_features = self.get_text_features()
         image_features = image_features / image_features.norm(dim=-1, keepdim=True)
@@ -319,14 +319,14 @@ class ClipTestTimeTuning(nn.Module):
 
         return logits
 
-    def forward(self, input):
+    def forward(self, input, masks=None):
         if isinstance(input, Tuple):
             view_0, view_1, view_2 = input
             return self.contrast_prompt_tuning(view_0, view_1, view_2)
         elif len(input.size()) == 2:
             return self.directional_prompt_tuning(input)
         else:
-            return self.inference(input)
+            return self.inference(input, masks=masks)
 
 
 def get_coop(clip_arch, test_set, device, n_ctx, ctx_init, learned_cls=False):

@@ -232,7 +232,7 @@ def main_worker(gpu, args):
                     transforms.ToTensor(),
                     normalize])
                 data_transform = MaskImgAugmenter(base_transform, preprocess, n_views=args.batch_size-1, 
-                                                augmix=len(set_id)>1)
+                                                augmix=len(set_id)>1, mask_ratio=args.mask_ratio)
                 batchsize = 1
         else:
             data_transform = transforms.Compose([
@@ -283,7 +283,7 @@ def main_worker(gpu, args):
         if args.mask:
             results[set_id] = test_time_adapt_mask_eval(val_loader, model, model_state, optimizer, optim_state, scaler, args)
         else:
-            test_time_adapt_eval(val_loader, model, model_state, optimizer, optim_state, scaler, args)
+            results[set_id] = test_time_adapt_eval(val_loader, model, model_state, optimizer, optim_state, scaler, args)
         del val_dataset, val_loader
         try:
             print("=> Acc. on testset [{}]: @1 {}/ @5 {}".format(set_id, results[set_id][0], results[set_id][1]))
@@ -301,14 +301,15 @@ def main_worker(gpu, args):
         print("{:.2f}".format(results[id][0]), end="	")
     print("\n")
 
-    tpt_stat = 'TPT' if args.tpt else 'No_TPT'
+    tpt_stat = '_TPT' if args.tpt else 'No_TPT'
+    mask_stat = 'Mask' + str(args.mask_ratio*100) if args.mask else 'No_Mask'
     with open('outputs/perf.txt', 'a') as f:
         if args.maple:
-            model = tpt_stat + '_MaPLe_' + 'depth_' + str(args.maple_depth) + '_ctx_' + str(args.n_ctx) + '_lr_' + str(args.lr)
+            model = mask_stat + tpt_stat + '_MaPLe_' + 'depth_' + str(args.maple_depth) + '_ctx_' + str(args.n_ctx) + '_lr_' + str(args.lr)
         elif args.cocoop:
-            model = tpt_stat + '_CoCoop' + 'ctx_' + str(args.n_ctx) + '_lr_' + str(args.lr)
+            model = mask_stat + tpt_stat + '_CoCoop' + 'ctx_' + str(args.n_ctx) + '_lr_' + str(args.lr)
         else:
-            model = tpt_stat + "_CoOp" + 'ctx_' + str(args.n_ctx) + '_lr_' + str(args.lr)
+            model = mask_stat + tpt_stat + "_CoOp" + 'ctx_' + str(args.n_ctx) + '_lr_' + str(args.lr)
         for k in results.keys():
             f.write("{} {} performance on {}: Top1- {:.2f}, Top5- {:.2f}\n".format(model, args.arch, k, results[k][0], results[k][1]))
 
@@ -452,7 +453,7 @@ def test_time_adapt_mask_eval(val_loader, model, model_state, optimizer, optim_s
                 if args.cocoop:
                     output = model((image_feature, pgen_ctx))
                 else:
-                    output = model(image)
+                    output = model(image, masks)
         # measure accuracy and record loss
         acc1, acc5 = accuracy(output, target, topk=(1, 5))
                 
@@ -489,6 +490,7 @@ if __name__ == '__main__':
                         help='GPU id to use.')
     parser.add_argument('--tpt', action='store_true', default=False, help='run test-time prompt tuning')
     parser.add_argument('--mask', action='store_true', default=False, help='Perform masking augmentation')
+    parser.add_argument('--mask_ratio', default=0.3, type=int, help='masking ratio')
     parser.add_argument('--selection_p', default=0.1, type=float, help='confidence selection percentile')
     parser.add_argument('--tta_steps', default=1, type=int, help='test-time-adapt steps')
     parser.add_argument('--n_ctx', default=4, type=int, help='number of tunable tokens')

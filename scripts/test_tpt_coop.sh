@@ -8,5 +8,5 @@ arch=ViT-B/16
 bs=64
 
 /home/jameel.hassan/.conda/envs/maple/bin/python ./tpt_classification.py ${data_root} --test_sets ${testsets} \
--a ${arch} -b ${bs} --gpu 0 --tpt \
+-a ${arch} -b ${bs} --gpu 0 --tpt --mask \
 --load ${coop_weight}

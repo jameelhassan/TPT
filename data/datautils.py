@@ -104,10 +104,11 @@ class AugMixAugmenter(object):
 
 class MaskImgAugmenter(object):
     def __init__(self, base_transform, preprocess, n_views=2, augmix=False, 
-                    severity=1, mask=True):
+                    severity=1, mask=True, mask_ratio=0.1):
         self.base_transform = base_transform
         self.preprocess = preprocess
         self.n_views = n_views
+        self.mask_ratio = mask_ratio
         if augmix:
             self.aug_list = augmentations.augmentations
         else:
@@ -123,7 +124,7 @@ class MaskImgAugmenter(object):
             input_size=224,       
             mask_patch_size=32,
             model_patch_size=16,
-            mask_ratio=0.2,
+            mask_ratio=self.mask_ratio,
         )
         
     def __call__(self, x):

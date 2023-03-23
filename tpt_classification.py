@@ -149,7 +149,7 @@ def main_worker(gpu, args):
             pretrained_ctx = maple_pt['prompt_learner.ctx']
             assert pretrained_ctx.size()[0] == args.n_ctx
             updates = 0
-            torch.load_state_dict(model, maple_pt, strict=False)
+            model.load_state_dict(maple_pt, strict=False)
             # with torch.no_grad():
             #     for n, p in model.named_parameters():
             #         if "prompt_learner" in n:
@@ -454,7 +454,7 @@ def test_time_adapt_mask_eval(val_loader, model, model_state, optimizer, optim_s
                 if args.cocoop:
                     output = model((image_feature, pgen_ctx))
                 else:
-                    output = model(image, masks)
+                    output = model(image)
         # measure accuracy and record loss
         acc1, acc5 = accuracy(output, target, topk=(1, 5))
                 
@@ -491,7 +491,7 @@ if __name__ == '__main__':
                         help='GPU id to use.')
     parser.add_argument('--tpt', action='store_true', default=False, help='run test-time prompt tuning')
     parser.add_argument('--mask', action='store_true', default=False, help='Perform masking augmentation')
-    parser.add_argument('--mask_ratio', default=0.2, type=int, help='masking ratio')
+    parser.add_argument('--mask_ratio', default=0.2, type=float, help='masking ratio')
     parser.add_argument('--selection_p', default=0.1, type=float, help='confidence selection percentile')
     parser.add_argument('--tta_steps', default=1, type=int, help='test-time-adapt steps')
     parser.add_argument('--n_ctx', default=4, type=int, help='number of tunable tokens')

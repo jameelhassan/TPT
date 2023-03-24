@@ -149,12 +149,12 @@ def main_worker(gpu, args):
             pretrained_ctx = maple_pt['prompt_learner.ctx']
             assert pretrained_ctx.size()[0] == args.n_ctx
             updates = 0
-            model.load_state_dict(maple_pt, strict=False)
-            # with torch.no_grad():
-            #     for n, p in model.named_parameters():
-            #         if "prompt_learner" in n:
-            #             p.copy_(maple_pt[n])
-            #             updates += 1
+            # model.load_state_dict(maple_pt, strict=False)
+            with torch.no_grad():
+                for n, p in model.named_parameters():
+                    if "prompt_learner" in n:
+                        p.copy_(maple_pt[n])
+                        updates += 1
 
             model.prompt_learner.ctx_init_state = pretrained_ctx
             model.set_prompt_inits()
@@ -227,8 +227,7 @@ def main_worker(gpu, args):
                 batchsize = 1
             else:
                 base_transform = transforms.Compose([
-                    transforms.Resize(args.resolution, interpolation=BICUBIC),
-                    transforms.CenterCrop(args.resolution)])
+                    transforms.Resize((args.resolution, args.resolution), interpolation=BICUBIC)])
                 preprocess = transforms.Compose([
                     transforms.ToTensor(),
                     normalize])
@@ -303,14 +302,14 @@ def main_worker(gpu, args):
     print("\n")
 
     tpt_stat = '_TPT-steps' + str(args.tta_steps) if args.tpt else 'No_TPT'
-    mask_stat = 'Mask' + str(args.mask_ratio*100) if args.mask else 'No_Mask'
+    mask_stat = 'Mask' + str(int(args.mask_ratio*100)) if args.mask else 'No_Mask'
     with open('outputs/perf.txt', 'a') as f:
         if args.maple:
             model = mask_stat + tpt_stat + '_MaPLe_' + 'depth_' + str(args.maple_depth) + '_ctx_' + str(args.n_ctx) + '_lr_' + str(args.lr)
         elif args.cocoop:
-            model = mask_stat + tpt_stat + '_CoCoop' + 'ctx_' + str(args.n_ctx) + '_lr_' + str(args.lr)
+            model = mask_stat + tpt_stat + '_CoCoop_' + 'ctx_' + str(args.n_ctx) + '_lr_' + str(args.lr)
         else:
-            model = mask_stat + tpt_stat + "_CoOp" + 'ctx_' + str(args.n_ctx) + '_lr_' + str(args.lr)
+            model = mask_stat + tpt_stat + "_CoOp_" + 'ctx_' + str(args.n_ctx) + '_lr_' + str(args.lr)
         for k in results.keys():
             f.write("{} {} performance on {}: Top1- {:.2f}, Top5- {:.2f}\n".format(model, args.arch, k, results[k][0], results[k][1]))
 
@@ -491,7 +490,7 @@ if __name__ == '__main__':
                         help='GPU id to use.')
     parser.add_argument('--tpt', action='store_true', default=False, help='run test-time prompt tuning')
     parser.add_argument('--mask', action='store_true', default=False, help='Perform masking augmentation')
-    parser.add_argument('--mask_ratio', default=0.2, type=float, help='masking ratio')
+    parser.add_argument('--mask_ratio', default=0.3, type=float, help='masking ratio')
     parser.add_argument('--selection_p', default=0.1, type=float, help='confidence selection percentile')
     parser.add_argument('--tta_steps', default=1, type=int, help='test-time-adapt steps')
     parser.add_argument('--n_ctx', default=4, type=int, help='number of tunable tokens')

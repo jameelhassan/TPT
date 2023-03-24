@@ -114,12 +114,6 @@ class MaskImgAugmenter(object):
         else:
             self.aug_list = []
         self.severity = severity
-        # self.mask_generator = MaskGenerator(
-        #     input_size=args.input_size,       
-        #     mask_patch_size=train_config['mask_patch_size'],
-        #     model_patch_size=train_config['model_patch_size'],
-        #     mask_ratio=train_config['mask_ratio'],
-        # )
         self.mask_generator = MaskGenerator(
             input_size=224,       
             mask_patch_size=32,
@@ -129,7 +123,7 @@ class MaskImgAugmenter(object):
         
     def __call__(self, x):
         image = self.preprocess(self.base_transform(x))
-        views = [augmix(x, self.preprocess, self.aug_list, self.severity) for _ in range(self.n_views)]
+        views = [image for _ in range(self.n_views)]
         masks = [self.mask_generator() for _ in range(self.n_views + 1)]
         return ([image] + views, masks)
 
